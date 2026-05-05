@@ -2,187 +2,192 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AR Navigation Demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Real 360 Stitching</title>
+
+<script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 
 <style>
 body {
-  margin:0;
-  overflow:hidden;
-  font-family:Arial;
-  color:white;
+    margin:0;
+    background:#111;
+    color:white;
+    text-align:center;
+    font-family:Arial;
 }
-
-/* CAMERA */
-video {
-  position:fixed;
-  width:100%;
-  height:100%;
-  object-fit:cover;
+video, canvas {
+    width:100%;
+    max-height:50vh;
 }
-
-/* AR ARROW */
-#arrow {
-  position:fixed;
-  bottom:80px;
-  left:50%;
-  width:6px;
-  height:120px;
-  background:red;
-  transform-origin: center bottom;
-  transform: translateX(-50%) rotate(0deg);
-}
-
-#arrow::after {
-  content:'';
-  position:absolute;
-  top:-15px;
-  left:50%;
-  transform:translateX(-50%);
-  border-left:10px solid transparent;
-  border-right:10px solid transparent;
-  border-bottom:15px solid red;
-}
-
-/* DISTANCE LABEL */
-#info {
-  position:fixed;
-  top:20px;
-  left:50%;
-  transform:translateX(-50%);
-  background:rgba(0,0,0,0.5);
-  padding:10px 20px;
-  border-radius:10px;
-  font-size:18px;
-}
-
-/* BUTTONS */
-#controls {
-  position:fixed;
-  bottom:10px;
-  left:50%;
-  transform:translateX(-50%);
-}
-
 button {
-  padding:10px 15px;
-  margin:5px;
-  font-size:16px;
-  border:none;
-  border-radius:8px;
+    margin:5px;
+    padding:10px;
 }
 </style>
 </head>
 
 <body>
 
-<video id="camera" autoplay playsinline></video>
+<h2>🌐 Real 360 Stitching (Cylindrical)</h2>
 
-<div id="info">Waiting GPS...</div>
-<div id="arrow"></div>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
 
-<div id="controls">
-  <button onclick="randomTarget()">🎯 Random Target</button>
-  <button onclick="openMap()">🗺 Open Map</button>
+<div>
+    <button onclick="startCamera()">Start</button>
+    <button onclick="capture()">Capture</button>
+    <button onclick="process()">Build 360</button>
+    <button onclick="exportJPG()">Export</button>
 </div>
 
 <script>
-const video = document.getElementById("camera");
-const arrow = document.getElementById("arrow");
-const info = document.getElementById("info");
+let video = document.getElementById("video");
+let canvas = document.getElementById("canvas");
+let ctx = canvas.getContext("2d");
 
-// ===== CAMERA =====
-navigator.mediaDevices.getUserMedia({
-  video: { facingMode: "environment" }
-}).then(stream => video.srcObject = stream);
+let frames = [];
+let panorama = null;
 
-// ===== USER LOCATION =====
-let userLat = 0;
-let userLon = 0;
-
-navigator.geolocation.watchPosition(pos => {
-  userLat = pos.coords.latitude;
-  userLon = pos.coords.longitude;
-});
-
-// ===== TARGET =====
-let targetLat = 0;
-let targetLon = 0;
-
-// ===== RANDOM TARGET (within ~500m) =====
-function randomTarget(){
-  if(!userLat) return alert("Waiting GPS...");
-
-  let offsetLat = (Math.random() - 0.5) * 0.005;
-  let offsetLon = (Math.random() - 0.5) * 0.005;
-
-  targetLat = userLat + offsetLat;
-  targetLon = userLon + offsetLon;
-
-  info.innerHTML = "New random destination set";
+// 📸 Camera
+async function startCamera(){
+    let stream = await navigator.mediaDevices.getUserMedia({
+        video:{facingMode:"environment"},
+        audio:false
+    });
+    video.srcObject = stream;
 }
 
-// ===== OPEN GOOGLE MAP =====
-function openMap(){
-  if(!targetLat) return;
-  let url = `https://www.google.com/maps?q=${targetLat},${targetLon}`;
-  window.open(url, "_blank");
+// 📸 Capture
+function capture(){
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video,0,0);
+
+    let img = new Image();
+    img.src = canvas.toDataURL("image/jpeg");
+    frames.push(img);
+
+    alert("Captured: " + frames.length);
 }
 
-// ===== MATH =====
-function toRad(d){ return d * Math.PI/180; }
-function toDeg(r){ return r * 180/Math.PI; }
+// 🌀 Cylindrical Projection
+function cylindricalWarp(src){
+    let dst = new cv.Mat.zeros(src.rows, src.cols, src.type());
 
-// Bearing
-function getBearing(lat1, lon1, lat2, lon2){
-  let φ1 = toRad(lat1);
-  let φ2 = toRad(lat2);
-  let Δλ = toRad(lon2 - lon1);
+    let f = src.cols; // focal length approx
 
-  let y = Math.sin(Δλ) * Math.cos(φ2);
-  let x = Math.cos(φ1)*Math.sin(φ2) -
-          Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+    for(let y=0;y<src.rows;y++){
+        for(let x=0;x<src.cols;x++){
 
-  let θ = Math.atan2(y, x);
-  return (toDeg(θ) + 360) % 360;
-}
+            let theta = (x - src.cols/2)/f;
+            let h = (y - src.rows/2)/f;
 
-// Distance (Haversine)
-function getDistance(lat1, lon1, lat2, lon2){
-  const R = 6371000; // meters
-  let dLat = toRad(lat2 - lat1);
-  let dLon = toRad(lon2 - lon1);
+            let X = Math.sin(theta);
+            let Y = h;
+            let Z = Math.cos(theta);
 
-  let a = Math.sin(dLat/2)**2 +
-          Math.cos(toRad(lat1)) *
-          Math.cos(toRad(lat2)) *
-          Math.sin(dLon/2)**2;
+            let x2 = Math.round(f * X/Z + src.cols/2);
+            let y2 = Math.round(f * Y/Z + src.rows/2);
 
-  let c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
-}
-
-// ===== ORIENTATION =====
-window.addEventListener("deviceorientationabsolute", (event) => {
-  let compass = event.alpha;
-
-  if(userLat && targetLat && compass != null){
-
-    let bearing = getBearing(userLat, userLon, targetLat, targetLon);
-    let angle = bearing - compass;
-
-    arrow.style.transform =
-      `translateX(-50%) rotate(${angle}deg)`;
-
-    // Distance
-    let d = getDistance(userLat, userLon, targetLat, targetLon);
-
-    if(d < 1000){
-      info.innerHTML = `Distance: ${d.toFixed(0)} m`;
-    } else {
-      info.innerHTML = `Distance: ${(d/1000).toFixed(2)} km`;
+            if(x2>=0 && x2<src.cols && y2>=0 && y2<src.rows){
+                dst.ucharPtr(y,x)[0] = src.ucharPtr(y2,x2)[0];
+                dst.ucharPtr(y,x)[1] = src.ucharPtr(y2,x2)[1];
+                dst.ucharPtr(y,x)[2] = src.ucharPtr(y2,x2)[2];
+            }
+        }
     }
-  }
-});
+    return dst;
+}
+
+// 🧩 Main process
+function process(){
+    if(frames.length < 3){
+        alert("Capture more images");
+        return;
+    }
+
+    let base = cv.imread(frames[0]);
+    base = cylindricalWarp(base);
+
+    for(let i=1;i<frames.length;i++){
+
+        let next = cv.imread(frames[i]);
+        next = cylindricalWarp(next);
+
+        let gray1 = new cv.Mat();
+        let gray2 = new cv.Mat();
+
+        cv.cvtColor(base, gray1, cv.COLOR_RGBA2GRAY);
+        cv.cvtColor(next, gray2, cv.COLOR_RGBA2GRAY);
+
+        let orb = new cv.ORB();
+
+        let kp1 = new cv.KeyPointVector();
+        let kp2 = new cv.KeyPointVector();
+        let des1 = new cv.Mat();
+        let des2 = new cv.Mat();
+
+        orb.detectAndCompute(gray1,new cv.Mat(),kp1,des1);
+        orb.detectAndCompute(gray2,new cv.Mat(),kp2,des2);
+
+        let bf = new cv.BFMatcher(cv.NORM_HAMMING,true);
+        let matches = new cv.DMatchVector();
+        bf.match(des1,des2,matches);
+
+        let srcPts=[], dstPts=[];
+
+        for(let j=0;j<matches.size();j++){
+            let m = matches.get(j);
+            let p1 = kp1.get(m.queryIdx).pt;
+            let p2 = kp2.get(m.trainIdx).pt;
+
+            srcPts.push(p1.x,p1.y);
+            dstPts.push(p2.x,p2.y);
+        }
+
+        let srcMat = cv.matFromArray(matches.size(),1,cv.CV_32FC2,srcPts);
+        let dstMat = cv.matFromArray(matches.size(),1,cv.CV_32FC2,dstPts);
+
+        let H = cv.findHomography(dstMat, srcMat, cv.RANSAC);
+
+        let result = new cv.Mat();
+        let dsize = new cv.Size(base.cols + next.cols, base.rows);
+
+        cv.warpPerspective(next, result, H, dsize);
+
+        let roi = result.roi(new cv.Rect(0,0,base.cols,base.rows));
+        base.copyTo(roi);
+
+        base = result;
+    }
+
+    cv.imshow("canvas", base);
+
+    // force 2:1 ratio
+    let out = document.createElement("canvas");
+    out.width = base.rows * 2;
+    out.height = base.rows;
+
+    let octx = out.getContext("2d");
+    octx.drawImage(canvas,0,0,out.width,out.height);
+
+    panorama = out.toDataURL("image/jpeg",0.95);
+
+    alert("Real 360 ready!");
+}
+
+// 💾 Export
+function exportJPG(){
+    if(!panorama){
+        alert("Build first");
+        return;
+    }
+
+    let a = document.createElement("a");
+    a.href = panorama;
+    a.download = "real360.jpg";
+    a.click();
+}
 </script>
 
 </body>
