@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AR Direction Pointer</title>
+<title>AR Navigation Arrow</title>
 
 <style>
 body {
@@ -18,14 +18,28 @@ video {
   object-fit:cover;
 }
 
-#line {
+/* AR ARROW */
+#arrow {
   position:fixed;
-  top:50%;
+  bottom:80px;
   left:50%;
-  width:200px;
-  height:4px;
+  width:6px;
+  height:120px;
   background:red;
-  transform-origin:left center;
+  transform-origin: center bottom;
+  transform: translateX(-50%) rotate(0deg);
+}
+
+/* Arrow head */
+#arrow::after {
+  content:'';
+  position:absolute;
+  top:-15px;
+  left:50%;
+  transform:translateX(-50%);
+  border-left:10px solid transparent;
+  border-right:10px solid transparent;
+  border-bottom:15px solid red;
 }
 </style>
 </head>
@@ -33,22 +47,22 @@ video {
 <body>
 
 <video id="camera" autoplay playsinline></video>
-<div id="line"></div>
+<div id="arrow"></div>
 
 <script>
 const video = document.getElementById("camera");
-const line = document.getElementById("line");
+const arrow = document.getElementById("arrow");
 
 // ===== TARGET LOCATION =====
-// Example: school or any place
 const targetLat = 17.167;
 const targetLon = 104.147;
 
-// ===== START CAMERA =====
-navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-.then(stream => video.srcObject = stream);
+// ===== CAMERA =====
+navigator.mediaDevices.getUserMedia({
+  video: { facingMode: "environment" }
+}).then(stream => video.srcObject = stream);
 
-// ===== GET USER LOCATION =====
+// ===== GPS =====
 let userLat = 0;
 let userLon = 0;
 
@@ -57,9 +71,9 @@ navigator.geolocation.watchPosition(pos => {
   userLon = pos.coords.longitude;
 });
 
-// ===== CALCULATE BEARING =====
-function toRad(deg){ return deg * Math.PI/180; }
-function toDeg(rad){ return rad * 180/Math.PI; }
+// ===== MATH =====
+function toRad(d){ return d * Math.PI/180; }
+function toDeg(r){ return r * 180/Math.PI; }
 
 function getBearing(lat1, lon1, lat2, lon2){
   let φ1 = toRad(lat1);
@@ -74,16 +88,17 @@ function getBearing(lat1, lon1, lat2, lon2){
   return (toDeg(θ) + 360) % 360;
 }
 
-// ===== DEVICE ORIENTATION =====
+// ===== ORIENTATION =====
 window.addEventListener("deviceorientationabsolute", (event) => {
-  let compass = event.alpha; // phone direction
+  let compass = event.alpha;
 
   if(userLat && userLon && compass != null){
     let bearing = getBearing(userLat, userLon, targetLat, targetLon);
 
     let angle = bearing - compass;
 
-    line.style.transform = `rotate(${angle}deg)`;
+    arrow.style.transform =
+      `translateX(-50%) rotate(${angle}deg)`;
   }
 });
 </script>
