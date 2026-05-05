@@ -2,15 +2,17 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AR Navigation Arrow</title>
+<title>AR Navigation Demo</title>
 
 <style>
 body {
   margin:0;
   overflow:hidden;
-  background:black;
+  font-family:Arial;
+  color:white;
 }
 
+/* CAMERA */
 video {
   position:fixed;
   width:100%;
@@ -30,7 +32,6 @@ video {
   transform: translateX(-50%) rotate(0deg);
 }
 
-/* Arrow head */
 #arrow::after {
   content:'';
   position:absolute;
@@ -41,28 +42,60 @@ video {
   border-right:10px solid transparent;
   border-bottom:15px solid red;
 }
+
+/* DISTANCE LABEL */
+#info {
+  position:fixed;
+  top:20px;
+  left:50%;
+  transform:translateX(-50%);
+  background:rgba(0,0,0,0.5);
+  padding:10px 20px;
+  border-radius:10px;
+  font-size:18px;
+}
+
+/* BUTTONS */
+#controls {
+  position:fixed;
+  bottom:10px;
+  left:50%;
+  transform:translateX(-50%);
+}
+
+button {
+  padding:10px 15px;
+  margin:5px;
+  font-size:16px;
+  border:none;
+  border-radius:8px;
+}
 </style>
 </head>
 
 <body>
 
 <video id="camera" autoplay playsinline></video>
+
+<div id="info">Waiting GPS...</div>
 <div id="arrow"></div>
+
+<div id="controls">
+  <button onclick="randomTarget()">🎯 Random Target</button>
+  <button onclick="openMap()">🗺 Open Map</button>
+</div>
 
 <script>
 const video = document.getElementById("camera");
 const arrow = document.getElementById("arrow");
-
-// ===== TARGET LOCATION =====
-const targetLat = 17.167;
-const targetLon = 104.147;
+const info = document.getElementById("info");
 
 // ===== CAMERA =====
 navigator.mediaDevices.getUserMedia({
   video: { facingMode: "environment" }
 }).then(stream => video.srcObject = stream);
 
-// ===== GPS =====
+// ===== USER LOCATION =====
 let userLat = 0;
 let userLon = 0;
 
@@ -71,10 +104,35 @@ navigator.geolocation.watchPosition(pos => {
   userLon = pos.coords.longitude;
 });
 
+// ===== TARGET =====
+let targetLat = 0;
+let targetLon = 0;
+
+// ===== RANDOM TARGET (within ~500m) =====
+function randomTarget(){
+  if(!userLat) return alert("Waiting GPS...");
+
+  let offsetLat = (Math.random() - 0.5) * 0.005;
+  let offsetLon = (Math.random() - 0.5) * 0.005;
+
+  targetLat = userLat + offsetLat;
+  targetLon = userLon + offsetLon;
+
+  info.innerHTML = "New random destination set";
+}
+
+// ===== OPEN GOOGLE MAP =====
+function openMap(){
+  if(!targetLat) return;
+  let url = `https://www.google.com/maps?q=${targetLat},${targetLon}`;
+  window.open(url, "_blank");
+}
+
 // ===== MATH =====
 function toRad(d){ return d * Math.PI/180; }
 function toDeg(r){ return r * 180/Math.PI; }
 
+// Bearing
 function getBearing(lat1, lon1, lat2, lon2){
   let φ1 = toRad(lat1);
   let φ2 = toRad(lat2);
@@ -88,17 +146,41 @@ function getBearing(lat1, lon1, lat2, lon2){
   return (toDeg(θ) + 360) % 360;
 }
 
+// Distance (Haversine)
+function getDistance(lat1, lon1, lat2, lon2){
+  const R = 6371000; // meters
+  let dLat = toRad(lat2 - lat1);
+  let dLon = toRad(lon2 - lon1);
+
+  let a = Math.sin(dLat/2)**2 +
+          Math.cos(toRad(lat1)) *
+          Math.cos(toRad(lat2)) *
+          Math.sin(dLon/2)**2;
+
+  let c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
 // ===== ORIENTATION =====
 window.addEventListener("deviceorientationabsolute", (event) => {
   let compass = event.alpha;
 
-  if(userLat && userLon && compass != null){
-    let bearing = getBearing(userLat, userLon, targetLat, targetLon);
+  if(userLat && targetLat && compass != null){
 
+    let bearing = getBearing(userLat, userLon, targetLat, targetLon);
     let angle = bearing - compass;
 
     arrow.style.transform =
       `translateX(-50%) rotate(${angle}deg)`;
+
+    // Distance
+    let d = getDistance(userLat, userLon, targetLat, targetLon);
+
+    if(d < 1000){
+      info.innerHTML = `Distance: ${d.toFixed(0)} m`;
+    } else {
+      info.innerHTML = `Distance: ${(d/1000).toFixed(2)} km`;
+    }
   }
 });
 </script>
