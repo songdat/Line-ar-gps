@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AR Direction Pointer</title>
+
+<style>
+body {
+  margin:0;
+  overflow:hidden;
+  background:black;
+}
+
+video {
+  position:fixed;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+#line {
+  position:fixed;
+  top:50%;
+  left:50%;
+  width:200px;
+  height:4px;
+  background:red;
+  transform-origin:left center;
+}
+</style>
+</head>
+
+<body>
+
+<video id="camera" autoplay playsinline></video>
+<div id="line"></div>
+
+<script>
+const video = document.getElementById("camera");
+const line = document.getElementById("line");
+
+// ===== TARGET LOCATION =====
+// Example: school or any place
+const targetLat = 17.167;
+const targetLon = 104.147;
+
+// ===== START CAMERA =====
+navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+.then(stream => video.srcObject = stream);
+
+// ===== GET USER LOCATION =====
+let userLat = 0;
+let userLon = 0;
+
+navigator.geolocation.watchPosition(pos => {
+  userLat = pos.coords.latitude;
+  userLon = pos.coords.longitude;
+});
+
+// ===== CALCULATE BEARING =====
+function toRad(deg){ return deg * Math.PI/180; }
+function toDeg(rad){ return rad * 180/Math.PI; }
+
+function getBearing(lat1, lon1, lat2, lon2){
+  let φ1 = toRad(lat1);
+  let φ2 = toRad(lat2);
+  let Δλ = toRad(lon2 - lon1);
+
+  let y = Math.sin(Δλ) * Math.cos(φ2);
+  let x = Math.cos(φ1)*Math.sin(φ2) -
+          Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+
+  let θ = Math.atan2(y, x);
+  return (toDeg(θ) + 360) % 360;
+}
+
+// ===== DEVICE ORIENTATION =====
+window.addEventListener("deviceorientationabsolute", (event) => {
+  let compass = event.alpha; // phone direction
+
+  if(userLat && userLon && compass != null){
+    let bearing = getBearing(userLat, userLon, targetLat, targetLon);
+
+    let angle = bearing - compass;
+
+    line.style.transform = `rotate(${angle}deg)`;
+  }
+});
+</script>
+
+</body>
+</html>
